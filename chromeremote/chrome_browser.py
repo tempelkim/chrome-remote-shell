@@ -63,8 +63,8 @@ class ChromeBrowser(object):
         self.work_dir = work_dir
         self.chrome_sock = socket
         self.chrome_pid = False
-        self.chrome_log_file = os.path.join(self.work_dir, 'chrome.log')
-        self.cookie_log_file = os.path.join(self.work_dir, 'cookie.log')
+        self.chrome_log_file = os.path.join(self.work_dir, 'chromelog.json')
+        self.cookie_log_file = os.path.join(self.work_dir, 'cookies.json')
         self.content_dir = os.path.join(self.work_dir, 'content')
         if content_dir:
             self.content_dir = content_dir
