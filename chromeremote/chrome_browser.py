@@ -163,6 +163,42 @@ class ChromeBrowser(object):
             else:
                 self.reqs.append(r)
 
+    def _read_data(self, data=False):
+        while True:
+            if data and 'method' in data:
+                # logger.debug('** METHOD: {}'.format(data['method']))
+                if data['method'] == 'Network.requestWillBeSent' \
+                        or data['method'] == 'Network.requestServedFromCache':
+                    request_id = data['params']['requestId']
+                    # logger.debug('open req {}'.format(request_id))
+                    if request_id not in self.open_requests:
+                        self.open_requests.append(request_id)
+                elif data['method'] == 'Network.loadingFinished':
+                    request_id = data['params']['requestId']
+                    # logger.debug('finished req {}'.format(request_id))
+                    try:
+                        self.open_requests.remove(request_id)
+                    except ValueError:
+                        logger.error(
+                                'loadingFinished but request {} not found'
+                                ' in open requests'.format(request_id)
+                        )
+                elif data['method'] == 'Network.loadingFailed':
+                    request_id = data['params']['requestId']
+                    logger.debug('loading failed on req {}'.format(request_id))
+                    try:
+                        self.open_requests.remove(request_id)
+                    except ValueError:
+                        logger.error(
+                                'request {} not found in open requests'.format(
+                                        request_id)
+                        )
+            try:
+                data = self._receive_chrome()
+            except websocket.WebSocketTimeoutException:
+                logger.debug('TIMEOUT REACHED')
+                break
+
     def start_chrome(self):
         chrome_dir = os.path.join(self.work_dir, 'chrome_profile')
         if not os.path.exists(chrome_dir):
@@ -216,45 +252,12 @@ class ChromeBrowser(object):
                         }
                 }
         )
-        while True:
-            if data and 'method' in data:
-                # logger.debug('** METHOD: {}'.format(data['method']))
-                if data['method'] == 'Network.requestWillBeSent' \
-                        or data['method'] == 'Network.requestServedFromCache':
-                    request_id = data['params']['requestId']
-                    # logger.debug('open req {}'.format(request_id))
-                    if request_id not in self.open_requests:
-                        self.open_requests.append(request_id)
-                elif data['method'] == 'Network.loadingFinished':
-                    request_id = data['params']['requestId']
-                    # logger.debug('finished req {}'.format(request_id))
-                    try:
-                        self.open_requests.remove(request_id)
-                    except ValueError:
-                        logger.error(
-                                'loadingFinished but request {} not found'
-                                ' in open requests'.format(request_id)
-                        )
-                elif data['method'] == 'Network.loadingFailed':
-                    request_id = data['params']['requestId']
-                    logger.debug('loading failed on req {}'.format(request_id))
-                    try:
-                        self.open_requests.remove(request_id)
-                    except ValueError:
-                        logger.error(
-                                'request {} not found in open requests'.format(
-                                        request_id)
-                        )
-            try:
-                data = self._receive_chrome()
-            except websocket.WebSocketTimeoutException:
-                logger.debug('TIMEOUT REACHED')
-                break
+        self._read_data(data)
         loopcount = 0
         while len(self.open_requests) > 0 and loopcount < 5:
             logger.debug('we have {} open requests: {}'.format(
                     len(self.open_requests), self.open_requests))
-            self._chrome_load_page()
+            self._read_data()
             loopcount += 1
         if len(self.open_requests) > 0:
             logger.debug('open requests: {}'.format(self.open_requests))
