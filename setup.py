@@ -2,7 +2,7 @@ from setuptools import setup
 
 setup(
         name='chrome_remote_shell',
-        version='0.1.1',
+        version='0.1.2',
         description='Client for remote debugging Google Chrome',
         url='https://github.com/tempelkim/chrome-remote-shell',
         author='Boris Kimmina',

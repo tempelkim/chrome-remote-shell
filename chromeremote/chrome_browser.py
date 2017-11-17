@@ -10,6 +10,7 @@ import time
 import json
 import sys
 import websocket
+from datetime import datetime
 from .remote_shell import ChromeRemoteShell
 from .chrome_profile import chrome_profile
 
@@ -59,6 +60,7 @@ class ChromeBrowser(object):
             content_dir=False,
             work_dir='/tmp/chromeremote',
             user_agent=False,
+            master_timeout=120,
     ):
         self.work_dir = work_dir
         self.chrome_sock = socket
@@ -81,6 +83,7 @@ class ChromeBrowser(object):
         if self.chrome_bin is None:
             logger.error('chrome binary not found')
             sys.exit(1)
+        self.master_timeout = master_timeout
 
     def _receive_chrome(self):
         response = json.loads(self.shell.soc.recv())
@@ -164,15 +167,16 @@ class ChromeBrowser(object):
                 self.reqs.append(r)
 
     def _read_data(self, data=False):
+        domstorage_activities = 0
         while True:
             if data and 'method' in data:
-                # logger.debug('** METHOD: {}'.format(data['method']))
                 if data['method'] == 'Network.requestWillBeSent' \
                         or data['method'] == 'Network.requestServedFromCache':
                     request_id = data['params']['requestId']
                     # logger.debug('open req {}'.format(request_id))
                     if request_id not in self.open_requests:
                         self.open_requests.append(request_id)
+                    domstorage_activities = 0
                 elif data['method'] == 'Network.loadingFinished':
                     request_id = data['params']['requestId']
                     # logger.debug('finished req {}'.format(request_id))
@@ -183,6 +187,7 @@ class ChromeBrowser(object):
                                 'loadingFinished but request {} not found'
                                 ' in open requests'.format(request_id)
                         )
+                    domstorage_activities = 0
                 elif data['method'] == 'Network.loadingFailed':
                     request_id = data['params']['requestId']
                     logger.debug('loading failed on req {}'.format(request_id))
@@ -193,6 +198,16 @@ class ChromeBrowser(object):
                                 'request {} not found in open requests'.format(
                                         request_id)
                         )
+                    domstorage_activities = 0
+                elif data['method'].startswith('DOMStorage'):
+                    domstorage_activities += 1
+            if domstorage_activities > 10:
+                # exit when there is no more network traffic
+                logger.debug('looks like a DOMStorage loop. stopping it...')
+                self._send_chrome(
+                    {"id": 0, "method": "DOMStorage.disable"})
+                break
+            self.check_timeout()
             try:
                 data = self._receive_chrome()
             except websocket.WebSocketTimeoutException:
@@ -231,6 +246,7 @@ class ChromeBrowser(object):
                 'Chrome PID: {} listening on port {}'.format(
                         p.pid, self.chrome_sock)
         )
+        self.start_time = datetime.now()
 
     def clean_chrome(self):
         logger.debug('Kill Chrome...')
@@ -238,6 +254,16 @@ class ChromeBrowser(object):
         logger.debug('Remove chrome profile...')
         time.sleep(self.shutdown_delay)
         subprocess.call(
+                ['rm', '-rf', os.path.join(self.work_dir, 'chrome_profile')])
+
+    def check_timeout(self):
+        now = datetime.now()
+        runtime = now - self.start_time
+        if runtime.total_seconds() > self.master_timeout:
+            logger.error('chrome master_timeout reached')
+            os.kill(int(self.chrome_pid), signal.SIGTERM)
+            time.sleep(self.shutdown_delay)
+            subprocess.call(
                 ['rm', '-rf', os.path.join(self.work_dir, 'chrome_profile')])
 
     def load_page(self, url):
@@ -255,6 +281,7 @@ class ChromeBrowser(object):
         self._read_data(data)
         loopcount = 0
         while len(self.open_requests) > 0 and loopcount < 5:
+            self.check_timeout()
             logger.debug('we have {} open requests: {}'.format(
                     len(self.open_requests), self.open_requests))
             self._read_data()
@@ -292,6 +319,7 @@ class ChromeBrowser(object):
                 'url': req.url,
                 'type': req.mime_type,
             }
+            self.check_timeout()
             response = self._send_chrome({
                     "id": 0,
                     "method": "Network.getResponseBody",
@@ -303,6 +331,7 @@ class ChromeBrowser(object):
                 except websocket.WebSocketTimeoutException:
                     logger.debug('TIMEOUT REACHED')
                     break
+                self.check_timeout()
             if not response:
                 logger.error('TIMEOUT FAIL: {} - {}'.format(req.id, req.url))
                 continue
@@ -322,6 +351,7 @@ class ChromeBrowser(object):
         logger.debug('cache index written.')
 
     def get_cookies(self):
+        self.check_timeout()
         response = self._send_chrome({
             "id": 0,
             "method": "Network.getAllCookies",
