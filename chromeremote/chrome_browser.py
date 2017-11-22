@@ -2,6 +2,7 @@
 Run Chrome with debugging console enabled
 """
 
+import base64
 import logging
 import os
 import subprocess
@@ -201,7 +202,15 @@ class ChromeBrowser(object):
                     domstorage_activities = 0
                 elif data['method'].startswith('DOMStorage'):
                     domstorage_activities += 1
-            if domstorage_activities > 10:
+                elif data['method'] in (
+                        'Network.dataReceived', 'Network.responseReceived'):
+                    domstorage_activities = 0
+                else:
+                    logger.debug(
+                            'unexpected data[\'method\']: {}'.format(
+                                    data['method'])
+                    )
+            if domstorage_activities > 20:
                 # exit when there is no more network traffic
                 logger.debug('looks like a DOMStorage loop. stopping it...')
                 self._send_chrome(
@@ -290,6 +299,22 @@ class ChromeBrowser(object):
             logger.debug('open requests: {}'.format(self.open_requests))
         self._send_chrome(
                 {"id": 0, "method": "Page.stopLoading"})
+        resp = self._send_chrome(
+                {
+                        "id": 0,
+                        "method": "Page.captureScreenshot",
+                        "params": {
+                            "format": "jpeg",
+                            "quality": 80
+                        }
+                }
+        )
+        if 'result' in resp:
+            scrsht = os.path.join(self.work_dir, 'screenshot.jpg')
+            with open(scrsht, 'wb') as f:
+                f.write(base64.b64decode(resp['result']['data']))
+            logger.debug('screenshot written to {}'.format(scrsht))
+        self._read_data()
         logger.debug('writing log to {}...'.format(self.chrome_log_file))
         with open(self.chrome_log_file, 'w') as f:
             json.dump(self.chrome_log, f, indent=4)
