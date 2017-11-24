@@ -85,6 +85,7 @@ class ChromeBrowser(object):
             logger.error('chrome binary not found')
             sys.exit(1)
         self.master_timeout = master_timeout
+        self.stop_loading = False
 
     def _receive_chrome(self):
         response = json.loads(self.shell.soc.recv())
@@ -171,6 +172,7 @@ class ChromeBrowser(object):
         domstorage_activities = 0
         while True:
             if data and 'method' in data:
+                logger.debug('got {}'.format(data['method']))
                 if data['method'] == 'Network.requestWillBeSent' \
                         or data['method'] == 'Network.requestServedFromCache':
                     request_id = data['params']['requestId']
@@ -215,6 +217,18 @@ class ChromeBrowser(object):
                 logger.debug('looks like a DOMStorage loop. stopping it...')
                 self._send_chrome(
                     {"id": 0, "method": "DOMStorage.disable"})
+                break
+            now = datetime.now()
+            runtime = now - self.start_time
+            if (not self.stop_loading
+                    and runtime.total_seconds() > self.master_timeout - 20):
+                logger.error(
+                        'timeout of {} seconds reached - stop loading'.format(
+                                self.master_timeout - 20)
+                )
+                self._send_chrome(
+                    {"id": 0, "method": "Page.stopLoading"})
+                self.stop_loading = True
                 break
             self.check_timeout()
             try:

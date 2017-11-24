@@ -46,6 +46,7 @@ class ChromeRemoteShell(object):
         wsurl = self.tablist[tab]['webSocketDebuggerUrl']
         if self.soc and self.soc.connected:
             self.soc.close()
+        websocket.setdefaulttimeout(3)
         self.soc = websocket.WebSocket()
         self.soc.settimeout(self.socket_timeout)
         self.soc.connect(wsurl)
