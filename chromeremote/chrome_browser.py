@@ -86,9 +86,11 @@ class ChromeBrowser(object):
             sys.exit(1)
         self.master_timeout = master_timeout
         self.stop_loading = False
+        self.domstorage_enabled = True
 
     def _receive_chrome(self):
         response = json.loads(self.shell.soc.recv())
+        # logger.debug('got {}'.format(response))
         self.chrome_log.append(response)
         return response
 
@@ -172,7 +174,6 @@ class ChromeBrowser(object):
         domstorage_activities = 0
         while True:
             if data and 'method' in data:
-                logger.debug('got {}'.format(data['method']))
                 if data['method'] == 'Network.requestWillBeSent' \
                         or data['method'] == 'Network.requestServedFromCache':
                     request_id = data['params']['requestId']
@@ -205,29 +206,34 @@ class ChromeBrowser(object):
                 elif data['method'].startswith('DOMStorage'):
                     domstorage_activities += 1
                 elif data['method'] in (
-                        'Network.dataReceived', 'Network.responseReceived'):
+                        'Network.dataReceived',
+                        'Network.responseReceived',
+                        'Network.resourceChangedPriority',
+                ):
                     domstorage_activities = 0
                 else:
                     logger.debug(
                             'unexpected data[\'method\']: {}'.format(
                                     data['method'])
                     )
-            if domstorage_activities > 20:
+            if self.domstorage_enabled and domstorage_activities > 20:
                 # exit when there is no more network traffic
                 logger.debug('looks like a DOMStorage loop. stopping it...')
-                self._send_chrome(
+                resp = self._send_chrome(
                     {"id": 0, "method": "DOMStorage.disable"})
-                break
+                self.domstorage_enabled = False
+                # break
             now = datetime.now()
             runtime = now - self.start_time
             if (not self.stop_loading
                     and runtime.total_seconds() > self.master_timeout - 20):
                 logger.error(
                         'timeout of {} seconds reached - stop loading'.format(
-                                self.master_timeout - 20)
+                                self.master_timeout - 60)
                 )
-                self._send_chrome(
+                resp = self._send_chrome(
                     {"id": 0, "method": "Page.stopLoading"})
+                logger.debug('got {}'.format(resp))
                 self.stop_loading = True
                 break
             self.check_timeout()
@@ -303,7 +309,8 @@ class ChromeBrowser(object):
         )
         self._read_data(data)
         loopcount = 0
-        while len(self.open_requests) > 0 and loopcount < 5:
+        while (len(self.open_requests) > 0 and loopcount < 5
+                and not self.stop_loading):
             self.check_timeout()
             logger.debug('we have {} open requests: {}'.format(
                     len(self.open_requests), self.open_requests))
@@ -313,6 +320,9 @@ class ChromeBrowser(object):
             logger.debug('open requests: {}'.format(self.open_requests))
         self._send_chrome(
                 {"id": 0, "method": "Page.stopLoading"})
+        logger.debug('writing log to {}...'.format(self.chrome_log_file))
+        with open(self.chrome_log_file, 'w') as f:
+            json.dump(self.chrome_log, f, indent=4)
         resp = self._send_chrome(
                 {
                         "id": 0,
@@ -323,15 +333,17 @@ class ChromeBrowser(object):
                         }
                 }
         )
-        if 'result' in resp:
-            scrsht = os.path.join(self.work_dir, 'screenshot.jpg')
-            with open(scrsht, 'wb') as f:
-                f.write(base64.b64decode(resp['result']['data']))
-            logger.debug('screenshot written to {}'.format(scrsht))
-        self._read_data()
-        logger.debug('writing log to {}...'.format(self.chrome_log_file))
-        with open(self.chrome_log_file, 'w') as f:
-            json.dump(self.chrome_log, f, indent=4)
+        while True:
+            if 'result' in resp and 'data' in resp['result']:
+                scrsht = os.path.join(self.work_dir, 'screenshot.jpg')
+                with open(scrsht, 'wb') as f:
+                    f.write(base64.b64decode(resp['result']['data']))
+                logger.debug('screenshot written to {}'.format(scrsht))
+                break
+            else:
+                logger.debug('got {}'.format(resp))
+                resp = self._receive_chrome()
+        # self._read_data()
 
     def get_content(self):
         if not os.path.exists(self.content_dir):
@@ -364,7 +376,7 @@ class ChromeBrowser(object):
                     "method": "Network.getResponseBody",
                     "params": {"requestId": req.id}
             })
-            while 'result' not in response:
+            while 'result' not in response and 'error' not in response:
                 try:
                     response = self._receive_chrome()
                 except websocket.WebSocketTimeoutException:
