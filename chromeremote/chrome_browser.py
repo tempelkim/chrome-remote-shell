@@ -148,12 +148,16 @@ class ChromeBrowser(object):
             elif entry['method'] == 'Network.requestServedFromCache':
                 requests[req_id] = Request(req_id)
             elif entry['method'] == 'Network.responseReceived':
+                if req_id not in requests:
+                    continue
                 rpr = rp['response']
                 requests[req_id].mime_type = rpr['mimeType']
                 requests[req_id].status_code = rpr['status']
                 requests[req_id].content_length = dict_intval(
                         'Content-Length', rpr['headers'])
             elif entry['method'] == 'Network.loadingFinished':
+                if req_id not in requests:
+                    continue
                 requests[req_id].complete = True
             elif entry['method'] == 'Network.loadingFailed':
                 requests[req_id].complete = True
