@@ -124,6 +124,10 @@ class ChromeBrowser(object):
                             }
                     }
             )
+        self._send_chrome(
+                {"id": 0, "method": "Network.clearBrowserCache"})
+        self._send_chrome(
+                {"id": 0, "method": "Network.deleteCookies"})
 
     def _get_requests(self, redirect_only=False):
         requests = {}
