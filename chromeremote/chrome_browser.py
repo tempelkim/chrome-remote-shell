@@ -62,6 +62,7 @@ class ChromeBrowser(object):
             work_dir='/tmp/chromeremote',
             user_agent=False,
             master_timeout=120,
+            extreme_debugging=False,
     ):
         self.work_dir = work_dir
         self.chrome_sock = socket
@@ -87,6 +88,7 @@ class ChromeBrowser(object):
         self.master_timeout = master_timeout
         self.stop_loading = False
         self.domstorage_enabled = True
+        self.extreme_debugging = extreme_debugging
 
     def _receive_chrome(self):
         response = json.loads(self.shell.soc.recv())
@@ -178,6 +180,8 @@ class ChromeBrowser(object):
         domstorage_activities = 0
         while True:
             if data and 'method' in data:
+                if self.extreme_debugging:
+                    logger.debug('got data: {}'.format(data))
                 if data['method'] == 'Network.requestWillBeSent' \
                         or data['method'] == 'Network.requestServedFromCache':
                     request_id = data['params']['requestId']
