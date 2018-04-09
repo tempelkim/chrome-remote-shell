@@ -100,6 +100,8 @@ class ChromeBrowser(object):
         navcom = json.dumps(data)
         self.shell.soc.send(navcom)
         response = self._receive_chrome()
+        if 'error' in response:
+            logger.warning('{}: got {}'.format(data, response))
         return response
 
     def _start_console(self):
@@ -127,7 +129,7 @@ class ChromeBrowser(object):
         self._send_chrome(
                 {"id": 0, "method": "Network.clearBrowserCache"})
         self._send_chrome(
-                {"id": 0, "method": "Network.deleteCookies"})
+                {"id": 0, "method": "Network.clearBrowserCookies"})
 
     def _get_requests(self, redirect_only=False):
         requests = {}
@@ -223,6 +225,8 @@ class ChromeBrowser(object):
                         'Network.resourceChangedPriority',
                 ):
                     domstorage_activities = 0
+                elif data['method'].startswith('Network.webSocket'):
+                    pass
                 else:
                     logger.debug(
                             'unexpected data[\'method\']: {}'.format(
